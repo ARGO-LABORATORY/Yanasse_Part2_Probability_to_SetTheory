@@ -1,0 +1,1167 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{microtype}
+\usepackage{cite}
+\usepackage{url}
+\usepackage{skak}        % chess symbols
+\usepackage{chessboard}  % board diagrams from FEN
+
+% Allow line breaks at underscores and dots in \texttt
+\renewcommand{\texttt}[1]{%
+  \begingroup\ttfamily\hyphenchar\font=`\-\relax
+  \def\_{\textunderscore\discretionary{}{}{}}%
+  #1\endgroup}
+
+% Global stretch to prevent overfull boxes from long identifiers
+\emergencystretch=3em
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{finding}[theorem]{Finding}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+  breaklines=true,
+  frame=single,
+  xleftmargin=1em,
+  escapeinside={(*}{*)},
+}
+
+\title{Yanasse: Finding New Proofs from Deep Vision's Analogies\\[0.5em]
+\large Part~2: Probability Theory $\to$ Set Theory}
+\author{Alexandre Linhares\thanks{alexandre@linhares.ltd. Affiliations: Getulio Vargas Foundation and ARGO LABS}}
+\date{April 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This is Part~2 of the Yanasse series, applying cross-area tactic
+transfer to the pair $\textsc{Probability} \to
+\textsc{SetTheory}$.  The system identifies tactic schemas that are
+heavily used in probability theory but rare or absent in set
+theory (cardinal and ordinal arithmetic), matches source and target
+proof states via GPU-accelerated relational analogy on a MacBook Air
+(Apple MPS backend), and asks an AI reasoning agent to semantically
+adapt the source pattern.
+
+The method produces 6~Lean-verified new proofs from 4 successful
+schema transfers out of 10 attempts (40\% schema success rate).  The
+proofs target two theorems in cardinal and ordinal arithmetic:
+\texttt{mul\_eq\_left\_iff} (when cardinal multiplication absorbs:
+$a \cdot b = a$) and \texttt{omega0\_lt\_preOmega\_iff} (characterizing
+$\omega < \operatorname{preOmega}(x) \Leftrightarrow \omega < x$).
+
+The deepest transfer is a \emph{proof-architecture transfer}: the
+probability-theory pattern ``case-split on a structural niceness
+predicate'' (e.g., \texttt{IsSFiniteKernel\,$\kappa$}) maps to the
+set-theory pattern ``case-split on whether a cardinal is infinite''
+(\texttt{$\aleph_0 \leq a$}).  The two predicates share no
+identifiers, types, or namespaces; the connection is purely semantic.
+Cross-pair comparison with Part~1 (Representation Theory) confirms the
+(head, modifier) decomposition finding: the same three schemas that
+transferred to representation theory---\texttt{ext1},
+\texttt{any\_goals}, \texttt{by\_cases}---also transfer to set theory,
+while the same three---\texttt{lift}, \texttt{measurability},
+\texttt{congrm}---fail in both areas.
+\end{abstract}
+
+\newpage
+\tableofcontents
+\newpage
+
+%======================================================================
+\section{Introduction}\label{sec:intro}
+%======================================================================
+
+Part~1 of this series~\cite{yanasse_part1} demonstrated that proof
+strategy patterns can be systematically transferred across distant areas
+of Mathlib, producing Lean-verified new proofs at a 40\% success rate on
+the pair Probability $\to$ Representation Theory.  The key finding was
+the \emph{(head, modifier) decomposition}: tactic heads are
+domain-gated, but modifiers carry domain-general patterns that transfer.
+
+This paper applies the same method to a second pair:
+$\textsc{Probability} \to \textsc{SetTheory}$.  Set theory in
+Mathlib comprises cardinal arithmetic
+(\texttt{Mathlib.SetTheory.Cardinal}), ordinal arithmetic
+(\texttt{Mathlib.SetTheory.Ordinal}), and ordinal notation
+(\texttt{Mathlib.SetTheory.Ordinal.Notation}).  The mathematical
+content---transfinite induction, cardinal absorption laws, ordinal
+fixed-point theory---is structurally distant from probability's
+measure-theoretic world.
+
+The pair is ranked second overall in the Yanasse pair-potential
+metric (Section~\ref{sec:method}), and the target area
+(\texttt{Mathlib.SetTheory}) contains 2{,}076 extracted proof states,
+roughly three times the size of the Representation Theory target (672).
+
+\subsection{Overview of the Deep Vision framework}
+
+The Deep Vision framework~\cite{linhares_deep_vision,
+linhares2024deepvision}, growing out of the Fluid Analogies Research
+Group tradition~\cite{hofstadter_fluid_1995, hofstadter_go_1999,
+hofstadter_surfaces_2013}, represents any structured domain as a
+\emph{relational network}: entities connected by typed, directed
+relations.  An analogy optimization finds the entity permutation that
+maximizes relational consistency between two networks.  The matching
+code (\texttt{deep\_vision\_lib.py}) is entirely domain-independent:
+it receives two relational structures and returns a similarity score
+and entity correspondence, without knowing which domain it is
+processing.
+
+\paragraph{Chess analogies.}  In chess~\cite{linhares_active_2005,
+linhares_understanding_2007, linhares_questioning_2010,
+linhares_entanglement_2012, linhares_what_2013,
+linhares_emergence_2014}, entities are pieces and relations are attack,
+defense, blocking, confinement, and pinning.  Two pieces in entirely
+different positions can play ``the same role'' if their relational
+profiles match.  The matcher discovers such correspondences across
+positions that differ radically in surface features---12-piece endgames
+matched against 5-piece positions, opening traps matched against sparse
+endgames~\cite{yanasse_part1}.
+
+\paragraph{From chess to proofs.}  The same matching engine, with only
+the relation extractor swapped, handles Lean~4 proof states: entities
+become hypotheses, goals, and types; relations become rewrite,
+fit/apply, head-match, structure, equality, reflexive, witness,
+bidirectional, kernel/simp, decidable, and lemma-needed (14 relation
+types).  No chess knowledge is used; no proof-specific heuristics are
+added to the matcher.  The proof-state matcher has previously been
+used to discover a formal proof of Wolstenholme's
+theorem~\cite{linhares_wolstenholme_2026} in Lean~4
+(see also~\cite{linhares_sketch_2026}).
+
+\subsection{Results preview}
+
+Applying the method to Probability $\to$ Set Theory produces:
+
+\begin{itemize}
+\item 6 Lean-verified new proofs from 4 successful schema transfers
+  out of 10 attempts (40\% schema success rate, with one schema
+  producing 3 independent proof variants).
+\item A \emph{proof-architecture transfer}: the deepest result
+  reorganizes a cardinal-arithmetic proof around a top-level
+  infinite/finite dichotomy, mirroring probability's
+  s-finite/non-s-finite split (Section~\ref{sec:proof3}).
+\item Cross-pair comparison confirming the (head, modifier)
+  decomposition from Part~1 (Section~\ref{sec:cross_pair}).
+\item 6 negative results with mathematical diagnoses
+  (Section~\ref{sec:failures}).
+\end{itemize}
+
+%======================================================================
+\section{Methodology}\label{sec:method}
+%======================================================================
+
+The methodology is identical to Part~1~\cite{yanasse_part1}.  We
+summarize the pipeline and note the parameters specific to this pair.
+
+\subsection{Pipeline summary}
+
+\begin{enumerate}
+\item \textbf{Schema extraction.}  Parse the Mathlib proof-state
+  corpus (217{,}133 entries).  Each tactic invocation becomes a schema
+  tuple $(\textit{head}, \textit{arity}, \textit{has\_with},
+  \textit{uses\_lemma})$.
+
+\item \textbf{$z$-score ranking.}  For each (area, schema) pair,
+  compute the $z$-score of the schema's frequency across 27 areas.
+  A schema with $z \geq +2$ in the source and $z \leq -1$ (or absent)
+  in the target is a transfer candidate.
+
+\item \textbf{GPU-accelerated analogy matching.}  Sample 8 source
+  proofs per schema, match each against all 2{,}076 Set Theory proof
+  states using the \texttt{BatchMatcher} on MPS.  Retain the top-5
+  target analogues by normalized score.
+
+\item \textbf{Semantic adaptation.}  A fresh AI reasoning session
+  (Claude Opus, 50-minute budget) adapts the source tactic's
+  \emph{mathematical strategy}---not its syntax---to the target
+  theorem.
+
+\item \textbf{Lean verification.}  The adapted proof is compiled
+  with \texttt{lake env lean}.  Exit code~0 with no \texttt{sorry}
+  constitutes verification.
+\end{enumerate}
+
+\subsection{Pair-specific parameters}
+
+\begin{itemize}
+\item \textbf{Source:} \texttt{Mathlib.Probability} (30{,}384 tactic
+  invocations, the largest Mathlib area).
+\item \textbf{Target:} \texttt{Mathlib.SetTheory} (2{,}076 proof
+  states---3$\times$ larger than the Representation Theory target).
+\item \textbf{Matching cost:} $8 \times 2{,}076 = 16{,}608$
+  individual analogy computations per schema, completing in
+  approximately 15--60~minutes on MPS depending on source proof-state
+  size.
+\item \textbf{Top-10 transfer candidates} (by gap score):
+  \texttt{filter\_upwards}, \texttt{congr\,with}, \texttt{fun\_prop},
+  \texttt{ext1}, \texttt{lift}, \texttt{any\_goals},
+  \texttt{measurability}, \texttt{by\_cases}, \texttt{congrm},
+  \texttt{push}.
+\end{itemize}
+
+Note that the same 10 schemas appear as in Part~1 (with the addition
+of \texttt{push}, replacing \texttt{all\_goals} which was already
+tested against Representation Theory).  This overlap enables
+direct cross-pair comparison.
+
+%======================================================================
+\section{Results: Probability $\to$ Set Theory}\label{sec:results}
+%======================================================================
+
+\begin{table}[h]
+\centering\small
+\caption{Transfer results for Probability $\to$ Set Theory.}
+\label{tab:results}
+\begin{tabular}{@{}clcccp{4.5cm}@{}}
+\toprule
+Item & Schema head & \texttt{with} & Ar.\ & Result & Adaptation \\
+\midrule
+10 & \texttt{filter\_upwards} & \checkmark & 1 & Failed & No \texttt{Filter} in ordinal arith.\ \\
+11 & \texttt{congr} & \checkmark & 0 & Failed & No extensionality for Cardinal \\
+12 & \texttt{fun\_prop} & & 0 & Failed & Domain-gated (Measurable) \\
+13 & \texttt{ext1} & & 1 & \textbf{New proof} & \texttt{inductionOn + mk\_congr} \\
+14 & \texttt{lift} & \checkmark & 5 & Failed & No \texttt{CanLift} for Ordinal \\
+15 & \texttt{any\_goals} & & 1 & \textbf{New proof} & \texttt{any\_goals lia} \\
+16 & \texttt{measurability} & & 0 & Failed & Domain-gated ($\sigma$-alg.) \\
+17 & \texttt{by\_cases} & & 4 & \textbf{New proof} & \texttt{by\_cases ha : $\aleph_0 \leq$ a} \\
+18 & \texttt{congrm} & & 5 & Failed & No shared outer operators \\
+19 & \texttt{push} & & 3 & \textbf{New proofs\,(3)} & \texttt{rwa [$\leftarrow$ preOmega\_omega0]} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent Four transfer attempts succeeded, producing 6 Lean-verified
+new proofs (item~19 yielded 3 independent proof variants).  The
+target theorems are:
+
+\begin{enumerate}
+\item[\textbf{P1.}] \textbf{Cardinal multiplication absorption}
+  (\texttt{mul\_eq\_left\_iff}, items~13, 15, 17).
+  For cardinals $a, b$:
+  \[
+    a \cdot b = a \;\Longleftrightarrow\;
+    \bigl(\max(\aleph_0, b) \leq a \;\wedge\; b \neq 0\bigr)
+    \;\vee\; b = 1 \;\vee\; a = 0.
+  \]
+  Three new proofs via three different transferred schemas.
+
+\item[\textbf{P2.}] \textbf{Pre-omega comparison}
+  (\texttt{omega0\_lt\_preOmega\_iff}, item~19).
+  For ordinals:
+  \[
+    \omega < \operatorname{preOmega}(x)
+      \;\Longleftrightarrow\; \omega < x.
+  \]
+  Three proof variants via the transferred ``push'' normalization
+  pattern.
+\end{enumerate}
+
+\subsection{New proof P1a: \texttt{ext1} $\to$
+  \texttt{Cardinal.inductionOn + mk\_congr}}\label{sec:proof1a}
+
+\paragraph{Theorem.}
+For cardinals $a$ and $b$, the absorption law $a \cdot b = a$
+holds if and only if $\max(\aleph_0, b) \leq a$ and $b \neq 0$,
+or $b = 1$, or $a = 0$.
+
+\paragraph{Context.}
+Cardinal arithmetic diverges sharply from natural-number arithmetic
+once infinite cardinals appear.  The absorption law
+$a \cdot b = a$ when $a$ is infinite and $b \leq a$ was first
+established (for $a \cdot a = a$) by Hessenberg in
+1906~\cite{hessenberg_1906}, later generalized by Tarski's theorem
+on cardinal products~\cite{tarski_1925} and systematized in
+Jech~\cite{jech_set_theory_2003} (Chapter~5) and
+Kunen~\cite{kunen_set_theory_2011} (Chapter~I, \S10).
+Holz, Steffens, and Weitz~\cite{holz_steffens_weitz_1999} provide
+a modern treatment in the context of Shelah's pcf
+theory~\cite{shelah_cardinal_1994}, which reveals deeper structure
+behind singular cardinal arithmetic.  The characterization
+in \texttt{mul\_eq\_left\_iff}---providing the complete equivalence
+including the finite and degenerate cases---appears in
+\texttt{Mathlib.SetTheory.Cardinal.Arithmetic}, whose formalization
+follows Jech's treatment.  The result is a workhorse lemma for
+cardinal exponentiation and Galvin--Hajnal-type
+bounds~\cite{galvin_hajnal_1975}.
+
+\paragraph{New proof (ext1 analog).}
+The original proof dispatches the two ``easy'' backward cases
+($b = 1$ and $a = 0$) with \texttt{all\_goals simp}, which invokes
+the simplification lemmas \texttt{mul\_one} and \texttt{zero\_mul}.
+The transferred proof replaces this automation with an
+\emph{explicit type-equivalence witness}, the set-theoretic analog
+of the extensionality principle:
+
+\begin{itemize}
+\item For $a \cdot 1 = a$: lift $a$ to a concrete type $\alpha$ via
+  \texttt{Cardinal.inductionOn}; express $\#\alpha \cdot 1$ as
+  $\#(\alpha \times \mathtt{PUnit})$ via \texttt{Cardinal.mul\_def};
+  close with \texttt{Cardinal.mk\_congr (Equiv.prodPUnit\,$\alpha$)},
+  the canonical equivalence $\alpha \times \mathtt{PUnit} \simeq \alpha$.
+
+\item For $0 \cdot b = 0$: analogously, lift $b$ and use
+  \texttt{Equiv.pemptyProd\,$\beta$} for
+  $\mathtt{PEmpty} \times \beta \simeq \mathtt{PEmpty}$.
+\end{itemize}
+
+\paragraph{Source pattern.}  In probability theory, \texttt{ext1\,$\omega$}
+reduces set equality $S = T$ to pointwise membership
+$\forall \omega,\; \omega \in S \leftrightarrow \omega \in T$---a
+workhorse for measurability proofs~\cite{yanasse_part1}.
+
+\paragraph{Adaptation.}  Direct \texttt{ext1} fails: Cardinals have no
+\texttt{@[ext]} lemma (they are quotient types, not structures with
+component-wise decomposition).  The semantic analog of ``reduce
+equality to constituent-level witness'' is: lift to a concrete
+representative type via \texttt{inductionOn}, then exhibit an
+explicit type equivalence via \texttt{mk\_congr}.
+
+\paragraph{Analogy matching.}  The source proof
+(\texttt{measurable\_stoppedValue}) had 51 entities; the top-3
+target analogues were all tied at QAP score 18.19, matched from
+\texttt{Cardinal/Arithmetic.lean}, \texttt{Cardinal/Basic.lean}, and
+\texttt{Ordinal/FixedPoint.lean}.
+
+\subsection{New proof P1b: \texttt{any\_goals} $\to$
+  \texttt{any\_goals lia}}\label{sec:proof1b}
+
+\paragraph{Theorem.}
+Same as P1a: \texttt{mul\_eq\_left\_iff}.
+
+\paragraph{New proof.}
+The transferred tactic \texttt{any\_goals lia} replaces the
+original \texttt{all\_goals simp} at the cleanup step of the
+backward direction.  After the case-split
+\texttt{rintro (...\,|\,rfl\,|\,rfl)}, two sub-goals remain:
+$a \cdot 1 = a$ (from $b = 1$) and $0 \cdot b = 0$ (from $a = 0$).
+The linear integer arithmetic decision procedure \texttt{lia}
+closes both via internal normalization on Cardinals.
+
+\paragraph{Source pattern.}  In
+\texttt{Mathlib.Probability.Kernel.IonescuTulcea.Traj}, the tactic
+\texttt{any\_goals lia} dispatches trivial arithmetic side-conditions
+after a case split on trajectory indices.  It is a \emph{partial-sweep
+combinator}: broadcast a decision procedure across all sub-goals,
+close the easy ones, leave the hard ones for subsequent tactics.
+
+\paragraph{Adaptation.}  The transfer is \emph{literal}: the source
+tactic \texttt{any\_goals lia} compiles directly in the target
+context, closing the same kind of arithmetic identities
+($a \cdot 1 = a$, $0 \cdot b = 0$) that its probability-theory
+counterpart closes (index arithmetic like $i \leq k + 1$).
+
+\paragraph{Contrast with Part~1.}  In Part~1,
+\texttt{any\_goals rfl} transferred to Representation Theory for
+the \emph{same architectural reason}: after a case-split, one branch
+is definitionally trivial.  The inner tactic differs (\texttt{rfl}
+vs.\ \texttt{lia}), but the proof pattern---``broadcast a simple
+closer across heterogeneous sub-goals''---is identical.
+
+\subsection{New proof P1c: \texttt{by\_cases} $\to$ top-level
+  infinite/finite dichotomy}\label{sec:proof3}
+
+\paragraph{Theorem.}
+Same as P1a: \texttt{mul\_eq\_left\_iff}.
+
+\paragraph{Context.}
+This is the deepest semantic transfer in the paper.  The original
+Mathlib proof of \texttt{mul\_eq\_left\_iff} splits the biconditional
+first (\texttt{refine $\langle$fun h $\Rightarrow$ ?, ?$\rangle$}),
+then uses \texttt{rcases le\_or\_gt $\aleph_0$ a} deep inside the
+forward direction.  The transferred proof reorganizes the entire
+argument around a top-level \texttt{by\_cases} on whether $a$ is
+infinite.
+
+\paragraph{New proof.}
+\begin{enumerate}
+\item \texttt{by\_cases ha : $\aleph_0 \leq$ a} --- the structural
+  ``niceness split.''
+\item \textbf{Infinite case} ($\aleph_0 \leq a$): Cardinal
+  multiplication absorbs: $a \cdot b = \max(a, b)$ by
+  \texttt{mul\_eq\_max\_of\_aleph0\_le\_left}.  From
+  $a \cdot b = a$ derive $b \leq a$ via the max characterization.
+  The backward direction dispatches the three disjuncts with
+  \texttt{mul\_eq\_left}, \texttt{simp}, \texttt{simp}.
+\item \textbf{Finite case} ($a < \aleph_0$): The first disjunct
+  (requiring $\aleph_0 \leq a$) is impossible.  A nested
+  \texttt{by\_cases h2a : a = 0} handles the sub-degenerate case.
+  When $a \neq 0$, show $b$ must also be finite (otherwise
+  $a \cdot b \geq b \geq \aleph_0 > a$), cast to $\mathbb{N}$
+  via \texttt{lt\_aleph0}, and use \texttt{Nat.mul\_eq\_left}.
+\end{enumerate}
+
+\paragraph{Source pattern.}  In
+\texttt{Mathlib.Probability.Kernel.Composition.MeasureComp}, the
+theorem \texttt{comp\_compProd\_comm} uses:
+\begin{lstlisting}
+by_cases h(*$\kappa$*) : IsSFiniteKernel (*$\kappa$*)
+\end{lstlisting}
+This is a \emph{structural niceness guard}: s-finite kernels support
+composition-product theory; non-s-finite kernels make
+\texttt{compProd} collapse to zero, so \texttt{simp} with
+collapsing lemmas closes the negative case in one line.
+
+\paragraph{Adaptation.}  The semantic mapping is:
+
+\medskip
+\begin{center}\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+& Source (Probability) & Target (Set Theory) \\
+\midrule
+Niceness predicate & \texttt{IsSFiniteKernel\,$\kappa$}
+  & $\aleph_0 \leq a$ \\
+What it enables & Composition-product theory
+  & Max-absorption arithmetic \\
+Negative case & \texttt{compProd} collapses $\to$ \texttt{simp}
+  & Falls to $\mathbb{N}$ arithmetic \\
+Positive case & Extensionality + rewrite
+  & \texttt{mul\_eq\_max} + \texttt{max\_eq\_left} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\medskip
+
+\noindent The predicates share no identifiers, types, or namespaces.
+The connection is semantic: both determine whether the main algebraic
+theory of their respective domains applies.  This is a transfer at the
+level of \emph{proof architecture}, not tactic syntax.
+
+\paragraph{Cross-pair comparison.}  In Part~1, \texttt{by\_cases}
+transferred to Representation Theory as ``case-split on $f = 0$''
+(a degenerate-morphism guard).  The Set Theory adaptation is
+arguably deeper: the probability-theory analog
+(\texttt{IsSFiniteKernel}) and the set-theory analog
+($\aleph_0 \leq a$) both partition their domain's objects into
+a ``nice regime'' where the main algebraic theory works and a
+``degenerate regime'' requiring qualitatively different reasoning.
+The morphism-triviality split in Part~1 was mathematically
+unnecessary (both branches closed identically); the
+infinite/finite split here is essential.
+
+\subsection{New proof P2: \texttt{push} $\to$ ordinal normalization
+  through an embedding}\label{sec:proof2}
+
+\paragraph{Theorem.}
+For ordinals $x$:
+\[
+  \omega < \operatorname{preOmega}(x)
+    \;\Longleftrightarrow\; \omega < x.
+\]
+Here $\operatorname{preOmega} : \mathrm{Ord} \hookrightarrow
+\mathrm{Ord}$ is the order embedding enumerating initial ordinals,
+and $\omega$ is the first infinite ordinal.
+
+\paragraph{Context.}
+The function $\operatorname{preOmega}$ enumerates the \emph{initial
+ordinals}---the smallest ordinals of each cardinality---a
+construction going back to Hartogs~\cite{hartogs_1915} and
+systematized by von Neumann~\cite{von_neumann_1923}.  In modern
+notation, $\operatorname{preOmega}(\alpha) = \omega_\alpha$ for
+infinite $\alpha$, with the convention
+$\operatorname{preOmega}(n) = n$ for finite $n$.  The fixed-point
+property $\operatorname{preOmega}(\omega) = \omega$ reflects the
+fact that $\omega$ is the $\omega$-th initial ordinal---the
+smallest aleph fixed point, studied extensively in
+Jech~\cite{jech_set_theory_2003} (Chapter~2) and
+Kunen~\cite{kunen_set_theory_2011} (Chapter~I, \S7).
+Drake~\cite{drake_1974} gives a thorough treatment of the aleph
+hierarchy and its fixed-point structure.  The biconditional
+\texttt{omega0\_lt\_preOmega\_iff} exploits the fixed-point property
+and the strict monotonicity of $\operatorname{preOmega}$ as an
+order embedding; it appears in
+\texttt{Mathlib.SetTheory.Cardinal.Aleph}.  The original Mathlib
+proof uses a targeted rewrite:
+\texttt{conv\_lhs => rw [$\leftarrow$ preOmega\_omega0,
+preOmega\_lt\_preOmega]}.
+
+\paragraph{New proofs (3 variants).}
+The transferred ``push'' normalization pattern---normalize by pushing a
+structural wrapper through an operator---yields three proof variants:
+
+\begin{enumerate}
+\item \textbf{Constructor + rwa.}  Split the iff; in each direction,
+  \texttt{rwa [$\leftarrow$ preOmega\_omega0,
+  preOmega\_lt\_preOmega]} introduces
+  $\operatorname{preOmega}(\omega)$ and cancels the paired embeddings.
+  Each rewrite is applied exactly once, avoiding the simp loop
+  (see below).
+
+\item \textbf{Targeted rewrite.}  \texttt{nth\_rw 1 [show $\omega =
+  \operatorname{preOmega}(\omega)$ from preOmega\_omega0.symm]; exact
+  preOmega\_lt\_preOmega}.  Replace only the first $\omega$, then
+  close with the embedding's monotonicity lemma.
+
+\item \textbf{Calc chain.}  A two-step calculation making the
+  ``push-through'' steps explicit:
+  $\omega < \operatorname{preOmega}(x)
+  \Leftrightarrow \operatorname{preOmega}(\omega) <
+  \operatorname{preOmega}(x)
+  \Leftrightarrow \omega < x$.
+\end{enumerate}
+
+\paragraph{Source pattern.}  In
+\texttt{Mathlib.Probability.Process.Stopping}, the tactic
+\texttt{push \_ $\in$ \_} normalizes set membership by pushing
+$\in$ through set-builder notation, preimages, and indexed unions:
+$\omega \in \{x \mid P\,x\} \leadsto P\,\omega$.
+
+\paragraph{Adaptation.}  The source pushes $\in$ through syntactic
+set-construction wrappers; the target pushes $<$ through
+$\operatorname{preOmega}$, an order-embedding wrapper.  The key
+lemmas play parallel roles:
+
+\medskip
+\begin{center}\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+Source (Probability) & Target (Set Theory) \\
+\midrule
+\texttt{Set.mem\_setOf\_eq} & \texttt{preOmega\_lt\_preOmega} \\
+(unfold set-builder) & (cancel paired embeddings) \\
+\texttt{Set.mem\_preimage} & \texttt{preOmega\_omega0} \\
+(push through preimage) & (introduce embedding at fixed point) \\
+\bottomrule
+\end{tabular}
+\end{center}
+\medskip
+
+\paragraph{A failed approach.}  The most natural ``push'' analog---
+\texttt{simp only [$\leftarrow$ preOmega\_omega0,
+preOmega\_lt\_preOmega]}---loops: the backward rewrite
+$\omega \to \operatorname{preOmega}(\omega)$ and the forward
+simplification that cancels paired embeddings create an infinite
+cycle.  The source's \texttt{push \_ $\in$ \_} never loops because
+set-builder unfolding is one-directional.  The \texttt{rwa}-based
+adaptation avoids this by applying each rewrite exactly once.
+
+%======================================================================
+\section{Cross-Pair Comparison with Part~1}\label{sec:cross_pair}
+%======================================================================
+
+Seven of the ten schemas tested against Set Theory were also tested
+against Representation Theory in Part~1.  This enables direct
+comparison:
+
+\begin{table}[h]
+\centering\small
+\caption{Schema transfer results across two target areas.}
+\label{tab:cross_pair}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Schema head & RepTheory (Part~1) & SetTheory (Part~2)
+  & Category \\
+\midrule
+\texttt{filter\_upwards} & \textbf{New proof} & Failed
+  & Domain-gated \\
+\texttt{congr\,with} & \textbf{New proof} & Failed
+  & Domain-general \\
+\texttt{fun\_prop} & Failed & Failed
+  & Domain-gated \\
+\texttt{ext1} & Failed & \textbf{New proof}
+  & Domain-general \\
+\texttt{lift} & Failed & Failed
+  & Domain-gated \\
+\texttt{any\_goals} & \textbf{New proof} & \textbf{New proof}
+  & Domain-general \\
+\texttt{measurability} & Failed & Failed
+  & Domain-gated \\
+\texttt{by\_cases} & \textbf{New proofs\,(2)} & \textbf{New proof}
+  & Domain-general \\
+\texttt{congrm} & Failed & Failed
+  & Domain-gated \\
+\texttt{push} & --- & \textbf{New proofs\,(3)}
+  & Domain-general \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{finding}[Consistent transfer/failure across targets]\label{find:consistency}
+Of the 7~schemas tested in both areas:
+\begin{itemize}
+\item \textbf{2 transfer in both:} \texttt{any\_goals},
+  \texttt{by\_cases}.  These are domain-general combinators whose
+  proof-architectural patterns (partial sweep, niceness guard) exist
+  in every mathematical area.
+\item \textbf{3 fail in both:} \texttt{fun\_prop},
+  \texttt{lift}, \texttt{measurability}.  These are domain-gated
+  tactics requiring measure-theoretic or topological type structures
+  absent from both targets.
+\item \textbf{2 differ:} \texttt{filter\_upwards} (succeeds in
+  RepTheory via modifier transfer, fails in SetTheory where
+  ordinal arithmetic has no Filter API),
+  \texttt{ext1} (fails in RepTheory where categorical
+  extensionality is structurally incompatible, succeeds in
+  SetTheory where \texttt{Cardinal.inductionOn} provides a semantic
+  analog).
+\end{itemize}
+\end{finding}
+
+The consistency of the ``never-transfer'' group---\texttt{fun\_prop},
+\texttt{lift}, \texttt{measurability}---across both targets
+strengthens the evidence that these schemas are \emph{intrinsically}
+domain-gated, not merely unlucky in their target matching.  Future
+runs could skip them entirely for non-measure-theoretic targets,
+saving ${\sim}30$\% of compute.
+
+The two schemas that differ between targets (\texttt{filter\_upwards}
+and \texttt{ext1}) illustrate that the (head, modifier) decomposition
+is target-sensitive: the modifier of \texttt{filter\_upwards}
+(``\texttt{[LIST] with $\omega$}'') finds a structural analog in
+representation theory's extensionality-based reasoning but not in
+ordinal arithmetic's algebraic reasoning, while \texttt{ext1}'s
+principle (``reduce equality to constituent-level witness'') finds
+a semantic analog in cardinal arithmetic's type-equivalence
+infrastructure but not in categorical extensionality.
+
+%======================================================================
+\section{The (Head, Modifier) Decomposition: Updated Evidence}%
+\label{sec:finding}
+%======================================================================
+
+Part~1 introduced the (head, modifier) decomposition.  The Set Theory
+results provide additional evidence and one refinement.
+
+\begin{finding}[Proof-architecture transfer]\label{find:architecture}
+The deepest transfers are not at the tactic level but at the
+\emph{proof-architecture} level: the decision to organize a proof
+around a top-level case-split on a structural niceness predicate
+(\texttt{by\_cases}, item~17) transfers across areas because the
+\emph{architecture}---split on niceness, handle degenerate case
+trivially, proceed with main theory in nice case---is domain-general,
+even when the specific niceness predicates are domain-specific.
+\end{finding}
+
+The \texttt{by\_cases} transfer to Set Theory is qualitatively
+different from its Part~1 counterpart.  In Part~1, the case-split
+($f = 0$) was mathematically unnecessary (both branches closed
+identically); the transfer demonstrated that the \emph{pattern}
+works but not that it \emph{improves} the proof.  In Part~2, the
+infinite/finite split is mathematically essential: the infinite
+case uses max-absorption ($a \cdot b = \max(a, b)$) while the
+finite case casts to $\mathbb{N}$ and uses \texttt{Nat.mul\_eq\_left}.
+These are fundamentally different proof strategies, and the
+transferred architecture makes this dichotomy explicit at the top
+level rather than burying it inside the forward direction.
+
+%======================================================================
+\section{Failures and Their Diagnoses}\label{sec:failures}
+%======================================================================
+
+\begin{description}
+\item[Item 10: \texttt{filter\_upwards}.]
+  \texttt{filter\_upwards} requires \texttt{Filter.Eventually} goals.
+  Set Theory's ordinal notation proofs (the top-1 target:
+  \texttt{nf\_repr\_split'}) have goals of the form $\mathtt{NF}\,o
+  \wedge \mathtt{repr}\,o = \omega \cdot \mathtt{repr}\,o' + m$---propositional
+  conjunctions about ordinal notation, not filter membership.
+  The 55-to-3 entity ratio (source to target) also produced a
+  spurious QAP score.
+
+\item[Item 11: \texttt{congr\,with}.]
+  \texttt{congr\,with} requires an extensionality theorem for the
+  goal type.  \texttt{Cardinal} has no \texttt{@[ext]} lemma
+  (confirmed by Lean: ``No applicable extensionality theorem found
+  for type Cardinal'').  Positive controls confirmed that
+  \texttt{congr\,with\,n} \emph{does} work on ordinal function
+  equality (\texttt{nfp\_add\_zero}) and \texttt{Cardinal.sum}---a
+  genuine transfer exists at rank~3, but the QAP matcher could not
+  discriminate it from the degenerate rank-1 mapping (37-to-3 entity
+  ratio).
+
+\item[Item 12: \texttt{fun\_prop}.]
+  \texttt{fun\_prop} handles \texttt{Measurable}, \texttt{Continuous},
+  and \texttt{Differentiable} goals.  Set Theory has zero such
+  goal types.  Same root cause as Part~1 item~2.
+
+\item[Item 14: \texttt{lift}.]
+  \texttt{lift} requires \texttt{CanLift} instances (e.g.,
+  $\mathbb{R}_{\geq 0}^\infty \to \mathbb{R}_{\geq 0}$).  No
+  \texttt{CanLift} instance exists for \texttt{Ordinal} in Mathlib:
+  ordinals have no canonical simpler base type.  Five Lean probes
+  all failed at typeclass synthesis.  Same root cause as Part~1
+  item~5.
+
+\item[Item 16: \texttt{measurability}.]
+  A $\sigma$-algebra predicate closure tactic.  The target theorem
+  (\texttt{repr\_opow}) proves that ordinal notation representation
+  preserves exponentiation---a purely algebraic statement with no
+  measurability predicates.  Same root cause as Part~1 item~7.
+
+\item[Item 18: \texttt{congrm}.]
+  \texttt{congrm} requires both sides of an equality to share a
+  common outer-operator skeleton (integrals, products, set
+  membership).  The target goal
+  $\omega < \operatorname{preOmega}(x) \Leftrightarrow \omega < x$
+  is an atomic order comparison---no composite structure to
+  decompose.  Five QAP-matched targets were identically scored
+  (23.53), indicating no discriminative structural match.
+  Same root cause as Part~1 item~9.
+\end{description}
+
+%======================================================================
+\section{Discussion}\label{sec:discussion}
+%======================================================================
+
+\subsection{The higher proof yield}
+
+Set Theory's schema success rate (4/10 = 40\%) matches
+Representation Theory's, but the \emph{proof yield} is higher:
+6~Lean-verified proofs versus~4.  This may reflect the target
+area's richer library of arithmetic lemmas.
+Three of the four successful transfers target
+\texttt{mul\_eq\_left\_iff}, a theorem with a complex case structure
+and multiple algebraic regimes.  Such theorems offer more ``surface
+area'' for diverse proof strategies.  In contrast, Representation
+Theory's successful transfers targeted two different theorems, each
+with a simpler proof structure.
+
+\subsection{Convergence to a single target}
+
+Three of the four successful schemas (items~13, 15, 17) converge on
+the same target theorem (\texttt{mul\_eq\_left\_iff}).  This is
+partly an artifact of the QAP matcher---the 2{,}076-entry target pool
+has a small number of high-scoring ``attractor'' entries---and partly
+reflects that \texttt{mul\_eq\_left\_iff} is genuinely a rich theorem
+with a case-analytic structure amenable to multiple proof strategies.
+
+\subsection{Depth of transfer}
+
+The transfers range from shallow (item~15: literal
+\texttt{any\_goals lia} compiles directly) to deep (item~17:
+the ``niceness guard'' architecture requires semantic reasoning about
+the role of $\aleph_0 \leq a$ in cardinal arithmetic).  Item~19
+is intermediate: the ``push normalization'' pattern is genuinely
+structural, but the target theorem is already a simple rewrite.
+
+\subsection{QAP entity-ratio degeneration}
+
+Items~10 and~11 both suffered from degenerate QAP scores caused by
+extreme entity-ratio mismatches (55-to-3, 37-to-3).  When the
+source proof state has $10\times$ more entities than the target, the
+matcher can achieve high scores by mapping a small cluster of source
+entities to the target while ignoring the rest.  Item~11's positive
+control (a genuine transfer at rank~3) was masked by the degenerate
+rank-1 score.
+
+This motivates a planned improvement: penalizing matches where the
+entity ratio exceeds a threshold (e.g., $5:1$), so that the matcher
+favors structurally comparable proof states.
+
+\subsection{Cost}
+
+The full pipeline for this pair consumed:
+\begin{itemize}
+\item ${\sim}$25 minutes of GPU time per schema (MPS) for analogy
+  matching ($8 \times 2{,}076$ comparisons).
+\item ${\sim}$8 hours of AI reasoning across 10 semantic adaptation
+  sessions.
+\item ${\sim}$\$100--150 in API cost.
+\end{itemize}
+
+%======================================================================
+\section{Conclusion}\label{sec:conclusion}
+%======================================================================
+
+The Probability $\to$ Set Theory pair achieves a 40\% schema success
+rate (4/10), producing 6 new Lean-verified proofs.  The key result is a
+\emph{proof-architecture transfer}: the probability-theory pattern
+``case-split on a structural niceness predicate'' maps to cardinal
+arithmetic's infinite/finite dichotomy, demonstrating that
+cross-area transfer can operate at the level of proof organization,
+not just tactic invocation.
+
+Cross-pair comparison with Part~1 confirms that domain-gated
+schemas (\texttt{fun\_prop}, \texttt{lift}, \texttt{measurability})
+consistently fail across targets, while domain-general
+combinators (\texttt{any\_goals}, \texttt{by\_cases}) consistently
+transfer.  This consistency enables predictive filtering: future
+runs can skip known-doomed schemas for non-measure-theoretic targets.
+
+Part~3 will apply the method to \texttt{Probability} $\to$
+\texttt{Condensed}, the hardest target tested so far (condensed
+mathematics eliminates the Filter and $\sigma$-algebra vocabulary that
+probability-theory schemas rely on).
+
+\section*{Acknowledgments}
+
+Named after Horacio Hideki Yanasse.  The Deep Vision matching engine
+was originally developed for chess cognition research; its application
+to formal mathematics was enabled by the domain-independent design of
+\texttt{deep\_vision\_lib.py}.  All computations were performed on a
+MacBook Air (Apple M-series, 32\,GB unified memory) using PyTorch~2.8
+on the MPS backend.
+
+\begin{thebibliography}{99}
+
+\bibitem{yanasse_part1}
+A.~Linhares,
+``Yanasse: Finding new proofs from Deep Vision's analogies --- Part~1:
+Probability Theory $\to$ Representation Theory,''
+ARGO LABS Report for Distribution, April 2026.
+
+\bibitem{linhares2024deepvision}
+A.~Linhares,
+``Deep Vision,''
+ARGO LABS Internal Report, 2026.
+
+\bibitem{hofstadter_fluid_1995}
+D.~R.~Hofstadter and the Fluid Analogies Research Group, \emph{Fluid Concepts \& Creative Analogies: Computer Models of the Fundamental Mechanisms of Thought}. New York: Basic Books, 1995.
+
+\bibitem{hofstadter_go_1999}
+D.~R.~Hofstadter, \emph{G\"odel, Escher, Bach: An Eternal Golden Braid}, 20th anniversary ed. New York: Basic Books, 1999.
+
+\bibitem{hofstadter_surfaces_2013}
+D.~R.~Hofstadter and E.~Sander, \emph{Surfaces and Essences: Analogy as the Fuel and Fire of Thinking}. New York: Basic Books, 2013.
+
+\bibitem{linhares_active_2005}
+A.~Linhares, ``An active symbols theory of chess intuition,'' \emph{Minds and Machines}, vol.~15, pp.~131--151, 2005.
+
+\bibitem{linhares_understanding_2007}
+A.~Linhares and P.~Brum, ``Understanding our understanding of strategic scenarios: What role do chunks play?'' \emph{Cognitive Science}, vol.~31, no.~6, pp.~989--1007, 2007.
+
+\bibitem{linhares_questioning_2010}
+A.~Linhares and A.~E.~T.~A.~Freitas, ``Questioning Chase and Simon's (1973) `Perception in Chess','' \emph{New Ideas in Psychology}, vol.~28, no.~1, pp.~64--78, 2010.
+
+\bibitem{linhares_entanglement_2012}
+A.~Linhares, A.~E.~T.~A.~Freitas, A.~Mendes, and J.~S.~Silva, ``Entanglement of perception and reasoning in the combinatorial game of chess,'' \emph{Cognitive Systems Research}, vol.~13, no.~1, pp.~72--86, 2012.
+
+\bibitem{linhares_what_2013}
+A.~Linhares and D.~M.~Chada, ``What is the nature of the mind's pattern-recognition process?'' \emph{New Ideas in Psychology}, vol.~31, no.~2, pp.~108--121, 2013.
+
+\bibitem{linhares_emergence_2014}
+A.~Linhares, ``The emergence of choice: Decision-making and strategic thinking through analogies,'' \emph{Information Sciences}, vol.~259, pp.~36--56, 2014.
+
+\bibitem{linhares_deep_vision}
+A.~Linhares, ``Deep Vision: Seeing the essence of proofs through analogy,'' ARGO LABS Internal Report, 2026.
+
+\bibitem{linhares_wolstenholme_2026}
+A.~Linhares,
+``Deep Vision: A formal proof of Wolstenholme's theorem in Lean~4,''
+ARGO LABS Report for Distribution, 2026.
+
+\bibitem{linhares_sketch_2026}
+A.~Linhares,
+``A sketch of Deep Vision's study of mathematics,''
+ARGO LABS Report for Distribution, 2026.
+
+\bibitem{jech_set_theory_2003}
+T.~Jech,
+\emph{Set Theory: The Third Millennium Edition, Revised and Expanded},
+Springer Monographs in Mathematics.
+Berlin: Springer-Verlag, 2003.
+
+\bibitem{kunen_set_theory_2011}
+K.~Kunen,
+\emph{Set Theory: An Introduction to Independence Proofs},
+Studies in Logic, vol.~102.
+London: College Publications, 2011.
+
+\bibitem{hessenberg_1906}
+G.~Hessenberg,
+``Grundbegriffe der Mengenlehre,''
+\emph{Abhandlungen der Friesschen Schule}, N.S., vol.~1, no.~4,
+pp.~485--706, 1906.
+
+\bibitem{tarski_1925}
+A.~Tarski,
+``Quelques th\'eor\`emes sur les alephs,''
+\emph{Fundamenta Mathematicae}, vol.~7, pp.~1--14, 1925.
+
+\bibitem{holz_steffens_weitz_1999}
+M.~Holz, K.~Steffens, and E.~Weitz,
+\emph{Introduction to Cardinal Arithmetic},
+Birkh\"auser Advanced Texts.
+Basel: Birkh\"auser Verlag, 1999.
+
+\bibitem{shelah_cardinal_1994}
+S.~Shelah,
+\emph{Cardinal Arithmetic},
+Oxford Logic Guides, vol.~29.
+Oxford: Oxford University Press, 1994.
+
+\bibitem{galvin_hajnal_1975}
+F.~Galvin and A.~Hajnal,
+``Inequalities for cardinal powers,''
+\emph{Ann.\ of Math.}, vol.~101, no.~3, pp.~491--498, 1975.
+
+\bibitem{hartogs_1915}
+F.~Hartogs,
+``\"Uber das Problem der Wohlordnung,''
+\emph{Math.\ Annalen}, vol.~76, no.~4, pp.~438--443, 1915.
+
+\bibitem{von_neumann_1923}
+J.~von Neumann,
+``Zur Einf\"uhrung der transfiniten Zahlen,''
+\emph{Acta Litterarum ac Scientiarum Regiae Universitatis
+Hungaricae Francisco-Josephinae, Sectio Scientiarum
+Mathematicarum}, vol.~1, pp.~199--208, 1923.
+
+\bibitem{drake_1974}
+F.~R.~Drake,
+\emph{Set Theory: An Introduction to Large Cardinals},
+Studies in Logic and the Foundations of Mathematics, vol.~76.
+Amsterdam: North-Holland, 1974.
+
+\end{thebibliography}
+
+%======================================================================
+% APPENDIX: Full Lean proofs
+%======================================================================
+\newpage
+\appendix
+
+\section{Lean Code: New Proofs}\label{app:lean}
+
+\subsection{Item 13: \texttt{mul\_eq\_left\_iff} via ext1-analog
+  (Cardinal.inductionOn + mk\_congr)}
+
+\begin{lstlisting}
+import Mathlib.SetTheory.Cardinal.Arithmetic
+
+open Cardinal in
+theorem mul_eq_left_iff' {a b : Cardinal} :
+    a * b = a <-> max (*$\aleph_0$*) b <= a
+      (*$\wedge$*) b (*$\neq$*) 0 (*$\vee$*) b = 1 (*$\vee$*) a = 0 := by
+  rw [max_le_iff]
+  refine <fun h => ?_, ?_>
+  . rcases le_or_gt (*$\aleph_0$*) a with ha | ha
+    . have : a (*$\neq$*) 0 := by
+        rintro rfl
+        exact ha.not_gt aleph0_pos
+      left
+      rw [and_assoc]
+      use ha
+      constructor
+      . rw [<- not_lt]
+        exact fun hb =>
+          ne_of_gt (hb.trans_le (le_mul_left this)) h
+      . rintro rfl
+        apply this
+        rw [mul_zero] at h
+        exact h.symm
+    right
+    by_cases h2a : a = 0
+    . exact Or.inr h2a
+    have hb : b (*$\neq$*) 0 := by
+      rintro rfl
+      apply h2a
+      rw [mul_zero] at h
+      exact h.symm
+    left
+    rw [<- h, mul_lt_aleph0_iff, lt_aleph0,
+        lt_aleph0] at ha
+    rcases ha with (rfl | rfl | <<n, rfl>, <m, rfl>>)
+    . contradiction
+    . contradiction
+    rw [<- Ne] at h2a
+    rw [<- Cardinal.one_le_iff_ne_zero] at h2a hb
+    norm_cast at h2a hb h (*$\vdash$*)
+    apply le_antisymm _ hb
+    rw [<- not_lt]
+    apply fun h2b => ne_of_gt _ h
+    conv_rhs => left; rw [<- mul_one n]
+    rw [Nat.mul_lt_mul_left]
+    . exact id
+    apply Nat.lt_of_succ_le h2a
+  . rintro (<<ha, hab>, hb> | rfl | rfl)
+    . rw [mul_eq_max_of_aleph0_le_left ha hb,
+          max_eq_left hab]
+    -- ext1 analog: reduce cardinal equality to
+    -- type equivalence via inductionOn + mk_congr
+    . induction a using Cardinal.inductionOn with
+      | mk (*$\alpha$*) =>
+        rw [show (1 : Cardinal) =
+            Cardinal.mk PUnit from
+              (Cardinal.mk_eq_one PUnit).symm]
+        rw [Cardinal.mul_def]
+        exact Cardinal.mk_congr
+          (Equiv.prodPUnit (*$\alpha$*))
+    . induction b using Cardinal.inductionOn with
+      | mk (*$\beta$*) =>
+        rw [show (0 : Cardinal) =
+            Cardinal.mk PEmpty from
+              (Cardinal.mk_eq_zero PEmpty).symm]
+        rw [Cardinal.mul_def]
+        exact Cardinal.mk_congr
+          (Equiv.pemptyProd (*$\beta$*))
+\end{lstlisting}
+
+\newpage
+\subsection{Item 15: \texttt{mul\_eq\_left\_iff} via
+  \texttt{any\_goals lia}}
+
+\begin{lstlisting}
+import Mathlib.SetTheory.Cardinal.Arithmetic
+
+open Cardinal
+
+theorem mul_eq_left_iff_reproof {a b : Cardinal} :
+    a * b = a <-> max (*$\aleph_0$*) b <= a
+      (*$\wedge$*) b (*$\neq$*) 0 (*$\vee$*) b = 1 (*$\vee$*) a = 0 := by
+  rw [max_le_iff]
+  refine <fun h => ?_, ?_>
+  -- [forward direction: identical to Mathlib]
+  . rcases le_or_gt (*$\aleph_0$*) a with ha | ha
+    . have : a (*$\neq$*) 0 := by
+        rintro rfl; exact ha.not_gt aleph0_pos
+      left; rw [and_assoc]; use ha
+      constructor
+      . rw [<- not_lt]
+        exact fun hb =>
+          ne_of_gt (hb.trans_le (le_mul_left this)) h
+      . rintro rfl; apply this
+        rw [mul_zero] at h; exact h.symm
+    right
+    by_cases h2a : a = 0
+    . exact Or.inr h2a
+    have hb : b (*$\neq$*) 0 := by
+      rintro rfl; apply h2a
+      rw [mul_zero] at h; exact h.symm
+    left
+    rw [<- h, mul_lt_aleph0_iff, lt_aleph0,
+        lt_aleph0] at ha
+    rcases ha with (rfl | rfl | <<n, rfl>, <m, rfl>>)
+    . contradiction
+    . contradiction
+    rw [<- Ne] at h2a
+    rw [<- Cardinal.one_le_iff_ne_zero] at h2a hb
+    norm_cast at h2a hb h (*$\vdash$*)
+    apply le_antisymm _ hb
+    rw [<- not_lt]
+    apply fun h2b => ne_of_gt _ h
+    conv_rhs => left; rw [<- mul_one n]
+    rw [Nat.mul_lt_mul_left]
+    . exact id
+    apply Nat.lt_of_succ_le h2a
+  . rintro (<<ha, hab>, hb> | rfl | rfl)
+    . rw [mul_eq_max_of_aleph0_le_left ha hb,
+          max_eq_left hab]
+    -- TRANSFERRED: any_goals lia (from Probability)
+    -- Original: all_goals simp
+    any_goals lia
+\end{lstlisting}
+
+\newpage
+\subsection{Item 17: \texttt{mul\_eq\_left\_iff} via top-level
+  \texttt{by\_cases ha : $\aleph_0 \leq$ a}}
+
+\begin{lstlisting}
+import Mathlib.SetTheory.Cardinal.Arithmetic
+
+open Cardinal
+
+theorem mul_eq_left_iff_reproof {a b : Cardinal} :
+    a * b = a <-> max (*$\aleph_0$*) b <= a
+      (*$\wedge$*) b (*$\neq$*) 0 (*$\vee$*) b = 1 (*$\vee$*) a = 0 := by
+  -- TOP-LEVEL by_cases: structural niceness split
+  by_cases ha : (*$\aleph_0$*) <= a
+  . -- INFINITE CASE: multiplication = max
+    rw [show max (*$\aleph_0$*) b <= a <->
+        (*$\aleph_0$*) <= a (*$\wedge$*) b <= a from max_le_iff]
+    constructor
+    . intro h
+      have ha0 : a (*$\neq$*) 0 :=
+        ne_of_gt (aleph0_pos.trans_le ha)
+      have hb0 : b (*$\neq$*) 0 := by
+        rintro rfl; rw [mul_zero] at h
+        exact ha0 h.symm
+      left
+      refine <<ha, ?_>, hb0>
+      have h1 :=
+        mul_eq_max_of_aleph0_le_left ha hb0
+      rw [h] at h1
+      exact (max_le_iff.mp (le_of_eq h1.symm)).2
+    . rintro (<<_, hab>, hb> | rfl | rfl)
+      . exact mul_eq_left ha hab hb
+      . simp
+      . simp
+  . -- FINITE CASE: reduces to Nat arithmetic
+    push Not at ha
+    constructor
+    . intro h
+      right
+      by_cases h2a : a = 0
+      . exact Or.inr h2a
+      . left
+        have hb : b < (*$\aleph_0$*) := by
+          by_contra hb'
+          push Not at hb'
+          have := mul_eq_max_of_aleph0_le_right
+            h2a hb'
+          rw [h, max_eq_right
+            (ha.trans_le hb').le] at this
+          exact ne_of_lt
+            (ha.trans_le hb') this
+        rw [lt_aleph0] at ha hb
+        obtain <n, rfl> := ha
+        obtain <m, rfl> := hb
+        have hn : n (*$\neq$*) 0 := by
+          exact_mod_cast h2a
+        norm_cast at h (*$\vdash$*)
+        exact (Nat.mul_eq_left hn).mp h
+    . rintro (<<h1, _>, _> | rfl | rfl)
+      . exact absurd (le_of_max_le_left h1)
+          (not_le.mpr ha)
+      . simp
+      . simp
+\end{lstlisting}
+
+\newpage
+\subsection{Item 19: \texttt{omega0\_lt\_preOmega\_iff} via
+  push-normalization (3 variants)}
+
+\begin{lstlisting}
+import Mathlib.SetTheory.Cardinal.Aleph
+
+open Ordinal
+
+-- Variant 1: constructor + rwa
+theorem omega0_lt_preOmega_iff_v1
+    {x : Ordinal} :
+    (*$\omega$*) < preOmega x <-> (*$\omega$*) < x := by
+  constructor
+  . intro h
+    rwa [<- preOmega_omega0,
+         preOmega_lt_preOmega] at h
+  . intro h
+    rwa [<- preOmega_omega0,
+         preOmega_lt_preOmega]
+
+-- Variant 2: targeted rewrite
+theorem omega0_lt_preOmega_iff_v2
+    {x : Ordinal} :
+    (*$\omega$*) < preOmega x <-> (*$\omega$*) < x := by
+  nth_rw 1 [show ((*$\omega$*) : Ordinal) = preOmega (*$\omega$*)
+    from preOmega_omega0.symm]
+  exact preOmega_lt_preOmega
+
+-- Variant 3: calc chain
+theorem omega0_lt_preOmega_iff_v3
+    {x : Ordinal} :
+    (*$\omega$*) < preOmega x <-> (*$\omega$*) < x := by
+  calc (*$\omega$*) < preOmega x
+      <-> preOmega (*$\omega$*) < preOmega x :=
+        by rw [preOmega_omega0]
+    _ <-> (*$\omega$*) < x := preOmega_lt_preOmega
+\end{lstlisting}
+
+\end{document}
