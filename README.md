@@ -53,7 +53,8 @@ import Mathlib
              Probability Theory to Set Theory},
   author  = {Linhares, Alexandre},
   year    = {2026},
-  month   = {April}
+  month   = {April},
+  publication = {Argolab.org Report for Dissemination}
 }
 ```
 
